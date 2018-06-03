@@ -5,16 +5,6 @@
 #include "RF24.h"
 #include "sensor_fusion.h"
 
-//////////////////////////////
-// MOTOR PINS
-// 9, 6, 5, 3
-//
-// 5    +x    3
-//
-// +y    +   -y
-//
-// 6    -x    9
-//////////////////////////////
 struct Data
 {
   int16_t accel_x;   // reg 59-60
@@ -32,20 +22,31 @@ int16_t offgx;
 int16_t offgy;
 int16_t offgz;
 
+
+
 Data mpu = {0,0,0,0,0,0};
 uint8_t *mpu_ptr = (uint8_t *)&mpu;
-uint8_t int_status = 0;
+quaternion quat = {0,0,0,0};
 
-uint8_t setfl = 1;
+uint8_t int_status = 0; //for reading in loop
 
 uint8_t pwr_mgmt = 0;
 uint8_t reg1 = 0;
 uint8_t reg2 = 0;
 uint8_t reg3 = 0;
-int16_t acx = 0;
-vector accel = {0,0,0};
-vector raw_acc_data = {0,0,0};
+
+unsigned long t_delay = 0;
+float angle = 0;
+
+vector raw_acc = {0,0,0};
+vector raw_gyro = {0,0,0};
+vector avg_gyro = {0,0,0};
 vector norm_acc = {0,0,0};
+vector norm_gyro = {0,0,0};
+vector gyro_init = {0,0,1};
+vector combo = {0,0,1};
+vector combo_norm = {0,0,1};
+
 SoftwareSerial mySerial (3,4);// (Rx, Tx)
 
 int16_t flipByte(int16_t x)
@@ -58,7 +59,7 @@ int16_t flipByte(int16_t x)
   return x;
 }
 
-void normalize_val()
+void bias_val()
 {
   int i = 0;
   int64_t ax = 0;
@@ -127,7 +128,7 @@ void setup()
     readReg(0x1A, &reg1, 1);
     readReg(0x1B, &reg2, 1);
     //printf("\n\nNEW values of registers:\npwr_mgmt:       %02x\nconfig:       %02x\ngyro_config:       %02x\n", pwr_mgmt, reg1, reg2);
-    normalize_val();
+    bias_val();
     //printf("\t\tAccelerometer\t\t\t\tGyroscope\n\n");
 
     
@@ -136,37 +137,109 @@ void setup()
 
 void loop()
 {
-  readReg(0x3A, &int_status, 1);
-  if ((int_status & 0x01))
-  {
-      readReg(0x3B, mpu_ptr, 6);
-      readReg(0x43, mpu_ptr + 6, 6);
-      raw_acc_data.x = flipByte(mpu.accel_x) - offax;
-      raw_acc_data.y = flipByte(mpu.accel_y) - offay;
-      raw_acc_data.z = flipByte(mpu.accel_z) - offaz;
-      mpu.gyro_x = flipByte(mpu.gyro_x) - offgx;
-      mpu.gyro_y = flipByte(mpu.gyro_y) - offgy;
-      mpu.gyro_z = flipByte(mpu.gyro_z) - offgz;
-  }
-  else
-    return;
-
-  //accel.x = (float)mpu.accel_x/(16384/9.81);
-  //accel.y = (float)mpu.accel_y/(16384/9.81);
-  //accel.z = (float)mpu.accel_z/(16384/9.81);
-  vector_normalize(&raw_acc_data, &norm_acc);
   
-  //double x = (double)acx / (16384/9.81);
-  //printf("%d\t%d\t%d\t\t\t%d\t%d\t%d\n", mpu.accel_x, mpu.accel_y, mpu.accel_z, mpu.gyro_x, mpu.gyro_y, mpu.gyro_z);
-  //delay(10);
-  //printf("%f\t%f\t%f\n", accel.x, accel.y, accel.z);
+    readReg(0x3A, &int_status, 1);
+    if ((int_status & 0x01))
+    {
+        readReg(0x3B, mpu_ptr, 6);
+        readReg(0x43, mpu_ptr + 6, 6);
+        raw_acc.x = flipByte(mpu.accel_x) - offax;
+        raw_acc.y = flipByte(mpu.accel_y) - offay;
+        raw_acc.z = flipByte(mpu.accel_z) - offaz;
+        raw_gyro.x = flipByte(mpu.gyro_x) - offgx;
+        raw_gyro.y = flipByte(mpu.gyro_y) - offgy;
+        raw_gyro.z = flipByte(mpu.gyro_z) - offgz;
+        t_delay = millis();
+        raw_acc.x /= 16384;
+        raw_acc.y /= 16384;
+        raw_acc.z /= 16384;
+        
+    }
+
+    delay(10);
+    readReg(0x3A, &int_status, 1);
+    if ((int_status & 0x01))
+    {
+      readReg(0x43, mpu_ptr + 6, 6);
+      avg_gyro.x = ((raw_gyro.x + flipByte(mpu.gyro_x) - offgx) / 2);
+      avg_gyro.y = ((raw_gyro.y + flipByte(mpu.gyro_y) - offgy) / 2);
+      avg_gyro.z = ((raw_gyro.z + flipByte(mpu.gyro_z) - offgz) / 2);
+      
+      t_delay = millis() - t_delay;
+//      Serial.print("Average Gyro raw:");
+//      Serial.print("\t");
+//      Serial.print(avg_gyro.x);
+//      Serial.print(" ");
+//      Serial.print(avg_gyro.y);
+//      Serial.print(" ");
+//      Serial.print(avg_gyro.z);
+//      Serial.println("");
+
+      avg_gyro.x *= ((t_delay) * 0.0010642 * 6.28);
+      avg_gyro.y *= ((t_delay) * 0.0010642 * 6.28);
+      avg_gyro.z *= ((t_delay) * 0.0010642 * 6.28);
+      
+      avg_gyro.x /= -1000;
+      avg_gyro.y /= -1000;
+      avg_gyro.z /= -1000;
+
+//      Serial.print("Average Gyro AFTER MULTIPLICATIONS:");
+//      Serial.print("\t");
+//      Serial.print(avg_gyro.x);
+//      Serial.print(" ");
+//      Serial.print(avg_gyro.y);
+//      Serial.print(" ");
+//      Serial.print(avg_gyro.z);
+//      Serial.println("");
+
+      vector_normalize(&raw_acc, &norm_acc);
+      angle = vector_normalize(&avg_gyro, &norm_gyro);
+      quaternion_create(&norm_gyro, angle, &quat);
+      quaternion_rotate(&gyro_init, &quat, &gyro_init);
+      quaternion_rotate(&combo, &quat, &combo);
+      combo.x = 0.3*norm_acc.x + 0.7*combo.x;
+      combo.y = 0.3*norm_acc.y + 0.7*combo.y;
+      combo.z = 0.3*norm_acc.z + 0.7*combo.z;
+      vector_normalize(&combo, &combo_norm);
+      
+    }
+
+
+  delay(50);
+  /*
+  Serial.print(raw_acc.x);
+  Serial.print("\t");
+  Serial.print(raw_acc.y);
+  Serial.print("\t");
+  Serial.print(raw_acc.z);
+  Serial.print("\t\t");
+  Serial.print(raw_gyro.x);
+  Serial.print("\t");
+  Serial.print(raw_gyro.y);
+  Serial.print("\t");
+  Serial.print(raw_gyro.z);
+  Serial.println("");
+  */
+  
   Serial.print(norm_acc.x);
   Serial.print(" ");
   Serial.print(norm_acc.y);
   Serial.print(" ");
   Serial.print(norm_acc.z);
+  Serial.print(" ");
+  Serial.print(gyro_init.x);
+  Serial.print(" ");
+  Serial.print(gyro_init.y);
+  Serial.print(" ");
+  Serial.print(gyro_init.z);
+  Serial.print(" ");
+  Serial.print(combo_norm.x);
+  Serial.print(" ");
+  Serial.print(combo_norm.y);
+  Serial.print(" ");
+  Serial.print(combo_norm.z);
   Serial.println("");
-  delay (250);
+  
 }
 
 
