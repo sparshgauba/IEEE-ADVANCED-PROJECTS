@@ -83,3 +83,7 @@ void quaternion_rotate(struct vector *v, struct quaternion *q, struct vector *re
  * result: q1 * q2.
  */
 void quaternion_multiply(struct quaternion *q1, struct quaternion *q2, struct quaternion *result);
+
+float vector_roll(struct vector *v);
+
+float vector_pitch(struct vector *v);

@@ -76,3 +76,15 @@ void quaternion_multiply(struct quaternion *q1, struct quaternion *q2, struct qu
   result->j = q1->r * q2->j - q1->i * q2->k + q1->j * q2->r + q1->k * q2->i;
   result->k = q1->r * q2->k + q1->i * q2->j - q1->j * q2->i + q1->k * q2->r;
 }
+
+float vector_roll(struct vector *v)
+{
+  return atan2(v->x, sqrt(pow(v->z, 2) + pow(v->y, 2)));
+}
+
+float vector_pitch(struct vector *v)
+{
+  return -atan2(v->y, v->z);
+}
+
+
